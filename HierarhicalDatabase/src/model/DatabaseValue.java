@@ -1,18 +1,19 @@
 package model;
 
-import java.util.TreeMap;
+import java.util.ArrayList;
+import java.util.Map;
 
 public class DatabaseValue {
 
     private final String value;
-    private final TreeMap<String, DatabaseValue> children;
+    private final ArrayList<Map.Entry<String, DatabaseValue>> children;
 
     public DatabaseValue(String value) {
         this.value = value;
         this.children = null;
     }
 
-    public DatabaseValue(TreeMap<String, DatabaseValue> children) {
+    public DatabaseValue(ArrayList<Map.Entry<String, DatabaseValue>> children) {
         this.children = children;
         this.value = null;
     }
@@ -21,7 +22,7 @@ public class DatabaseValue {
         return value;
     }
 
-    public TreeMap<String, DatabaseValue> getChildren() {
+    public ArrayList<Map.Entry<String, DatabaseValue>> getChildren() {
         return children;
     }
 }

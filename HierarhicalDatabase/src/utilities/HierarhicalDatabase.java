@@ -3,7 +3,11 @@ package utilities;
 import java.io.File;
 import java.io.IOException;
 import java.io.RandomAccessFile;
+import java.util.AbstractMap;
+import java.util.ArrayList;
+import java.util.Base64;
 import java.util.HashMap;
+import java.util.Random;
 import java.util.TreeMap;
 import model.DatabaseValue;
 
@@ -13,7 +17,7 @@ public class HierarhicalDatabase implements AutoCloseable {
     private long nodeAdress;
 
     public HierarhicalDatabase(File file) throws IOException {
-        this.stream = new RandomAccessFile(file, "rw");
+        this.stream = new RandomAccessFile(file, "rws");
     }
 
     private HierarhicalDatabase(RandomAccessFile stream, long adr) {
@@ -56,7 +60,7 @@ public class HierarhicalDatabase implements AutoCloseable {
         nameSize = (short) -nameSize;
         this.stream.skipBytes(nameSize);
 
-        DatabaseValue res = new DatabaseValue(new TreeMap<>());
+        DatabaseValue res = new DatabaseValue(new ArrayList<>());
 
         int listSize = 3;
         while (true) {
@@ -67,7 +71,7 @@ public class HierarhicalDatabase implements AutoCloseable {
                 }
                 long filePointer = this.stream.getFilePointer();
                 HierarhicalDatabase hd = new HierarhicalDatabase(this.stream, adr);
-                res.getChildren().put(hd.name(), hd.readValue());
+                res.getChildren().add(new AbstractMap.SimpleEntry<>(hd.name(), hd.readValue()));
                 this.stream.seek(filePointer);
             }
 
@@ -75,6 +79,7 @@ public class HierarhicalDatabase implements AutoCloseable {
             if (nextAdr == 0) {
                 break;
             }
+            this.stream.seek(nextAdr);
             listSize = 10;
         }
 
@@ -103,7 +108,9 @@ public class HierarhicalDatabase implements AutoCloseable {
             listSize = 10;
             long nextAdr = this.stream.readLong();
             if (nextAdr == 0) {
+                this.stream.seek(this.stream.getFilePointer() - Long.BYTES);
                 long newAdr = this.newAdress();
+                this.stream.writeLong(newAdr);
                 this.createList(newAdr, listSize);
                 this.stream.seek(newAdr);
             } else {
@@ -134,7 +141,9 @@ public class HierarhicalDatabase implements AutoCloseable {
             listSize = 10;
             long nextAdr = this.stream.readLong();
             if (nextAdr == 0) {
+                this.stream.seek(this.stream.getFilePointer() - Long.BYTES);
                 long newAdr = this.newAdress();
+                this.stream.writeLong(newAdr);
                 this.createList(newAdr, listSize);
                 this.stream.seek(newAdr);
             } else {
@@ -144,7 +153,7 @@ public class HierarhicalDatabase implements AutoCloseable {
     }
 
     public HierarhicalDatabase findChild(String name) throws IOException {
-        this.stream.seek(this.nodeAdress);
+        /*this.stream.seek(this.nodeAdress);
         short nameSize = this.stream.readShort();
         nameSize = (short) -nameSize;
         this.stream.skipBytes(nameSize);
@@ -172,6 +181,44 @@ public class HierarhicalDatabase implements AutoCloseable {
             } else {
                 this.stream.seek(nextAdr);
             }
+        }*/
+        long adr = this.findChildAdress(name);
+        if (adr == 0) {
+            return null;
+        }
+        HierarhicalDatabase child = new HierarhicalDatabase(stream, adr);
+        return child;
+    }
+    
+    private long findChildAdress(String name) throws IOException {
+        this.stream.seek(this.nodeAdress);
+        short nameSize = this.stream.readShort();
+        nameSize = (short) -nameSize;
+        this.stream.skipBytes(nameSize);
+        
+        int listSize = 3;
+        while (true) {
+            for (int i = 0; i < listSize; i++) {
+                long slot = this.stream.readLong();
+                if (slot == 0) {
+                    continue;
+                }
+
+                long filePointer = this.stream.getFilePointer();
+                HierarhicalDatabase child = new HierarhicalDatabase(stream, slot);
+                if (child.name().equals(name)) {
+                    return slot;
+                }
+                this.stream.seek(filePointer);
+            }
+
+            listSize = 10;
+            long nextAdr = this.stream.readLong();
+            if (nextAdr == 0) {
+                return 0;
+            } else {
+                this.stream.seek(nextAdr);
+            }
         }
     }
 
@@ -196,7 +243,8 @@ public class HierarhicalDatabase implements AutoCloseable {
         this.stream.write(value.getBytes());
     }
 
-    public void createList(long adress, int slots) throws IOException {
+    protected void createList(long adress, int slots) throws IOException {
+        this.stream.seek(adress);
         for (int i = 0; i < slots; i++) {
             this.stream.writeLong(0);
         }
@@ -207,22 +255,25 @@ public class HierarhicalDatabase implements AutoCloseable {
         new File("dbTest").delete();
         try (HierarhicalDatabase db = new HierarhicalDatabase(new File("dbTest"))) {
             db.createParent(0, "root");
-            HierarhicalDatabase users = db.addParent("users");
-            HierarhicalDatabase u = users.addParent("1");
-            u.addLeaf("username", "username1");
-            u.addLeaf("password", "pass2");
-            u = users.addParent("2");
-            u.addLeaf("username", "username2");
-            u.addLeaf("password", "pass2");
-            u = users.addParent("3");
-            u.addLeaf("username", "username3");
-            u.addLeaf("password", "pass3");
+
+            HierarhicalDatabase numbers = db.addParent("numbers");
+            for (int i = 1; i <= 10; i++) {
+                numbers.addLeaf("" + i, "" + i);
+            }
+            
+            HierarhicalDatabase strs = db.addParent("strings");
+            Random random = new Random();
+            byte[] buff = new byte[64];
+            for (int i = 0; i < 10; i++) {
+                random.nextBytes(buff);
+                strs.addLeaf("string", Base64.getEncoder().encodeToString(buff));
+            }
 
             DatabaseValue v = db.readValue();
             print(db.name(), v, 0);
-
-            v = db.findChild("users").findChild("2").readValue();
-            print(db.findChild("users").findChild("2").name(), v, 0);
+            
+            DatabaseValue va = db.findChild("strings").findChild("string").readValue();
+            System.out.println(va.getValue());
         } catch (IOException e) {
             e.printStackTrace();
         }
@@ -239,8 +290,7 @@ public class HierarhicalDatabase implements AutoCloseable {
         }
 
         System.out.println(name);
-        v.getChildren().entrySet()
-                .forEach(e -> {
+        v.getChildren().forEach(e -> {
                     print(e.getKey(), e.getValue(), tabs + 1);
                 });
     }
