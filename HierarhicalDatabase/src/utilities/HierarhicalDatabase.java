@@ -58,6 +58,8 @@ public class HierarhicalDatabase implements AutoCloseable {
             this.map.add(this.nodeAdress, this.nodeAdress + nameSize + valSize + Short.BYTES * 2);
             return;
         }
+        nameSize = (short) -nameSize;
+        this.stream.skipBytes(nameSize);
         int listSize = 3;
         this.map.add(this.nodeAdress, this.nodeAdress + nameSize + Short.BYTES + Long.BYTES * (listSize + 1));
         while (true) {
@@ -146,7 +148,7 @@ public class HierarhicalDatabase implements AutoCloseable {
                 long slot = this.stream.readLong();
                 if (slot == 0) {
                     this.stream.seek(this.stream.getFilePointer() - Long.BYTES);
-                    long newAdr = this.newAdress();
+                    long newAdr = this.newAdress(this.size(name, null));
                     this.stream.writeLong(newAdr);
                     this.createParent(newAdr, name);
                     HierarhicalDatabase res = new HierarhicalDatabase(this, newAdr);
@@ -159,14 +161,27 @@ public class HierarhicalDatabase implements AutoCloseable {
             long nextAdr = this.stream.readLong();
             if (nextAdr == 0) {
                 this.stream.seek(this.stream.getFilePointer() - Long.BYTES);
-                long newAdr = this.newAdress();
+                long newAdr = this.newAdress(listSize);
                 this.stream.writeLong(newAdr);
                 this.createList(newAdr, listSize);
+                this.map.add(newAdr, newAdr + Long.BYTES * (listSize + 1));
                 this.stream.seek(newAdr);
             } else {
                 this.stream.seek(nextAdr);
             }
         }
+    }
+
+    private int size(String name, String value) {
+        int res = name.length() + Short.BYTES;
+        if (value != null) {
+            return res + value.length() + Short.BYTES;
+        }
+        return res + Long.BYTES * (4);
+    }
+
+    private int size(int slots) {
+        return Long.BYTES * (slots + 1);
     }
 
     protected HierarhicalDatabase addLeaf(String name, String value) throws IOException {
@@ -181,7 +196,7 @@ public class HierarhicalDatabase implements AutoCloseable {
                 long slot = this.stream.readLong();
                 if (slot == 0) {
                     this.stream.seek(this.stream.getFilePointer() - Long.BYTES);
-                    long newAdr = this.newAdress();
+                    long newAdr = this.newAdress(this.size(name, value));
                     this.stream.writeLong(newAdr);
                     this.createLeaf(newAdr, name, value);
                     HierarhicalDatabase res = new HierarhicalDatabase(this, newAdr);
@@ -194,9 +209,10 @@ public class HierarhicalDatabase implements AutoCloseable {
             long nextAdr = this.stream.readLong();
             if (nextAdr == 0) {
                 this.stream.seek(this.stream.getFilePointer() - Long.BYTES);
-                long newAdr = this.newAdress();
+                long newAdr = this.newAdress(this.size(listSize));
                 this.stream.writeLong(newAdr);
                 this.createList(newAdr, listSize);
+                this.map.add(newAdr, newAdr + Long.BYTES * (listSize + 1));
                 this.stream.seek(newAdr);
             } else {
                 this.stream.seek(nextAdr);
@@ -293,6 +309,8 @@ public class HierarhicalDatabase implements AutoCloseable {
                 if (child.name().equals(name)) {
                     this.stream.seek(filePointer - Long.BYTES);
                     this.stream.writeLong(0);
+                    new HierarhicalDatabase(this, slot).removeFromMemory();
+                    return;
                 }
                 this.stream.seek(filePointer);
             }
@@ -307,7 +325,11 @@ public class HierarhicalDatabase implements AutoCloseable {
         }
     }
 
-    public long newAdress() throws IOException {
+    public long newAdress(long size) throws IOException {
+        long res = this.map.findFree(size);
+        if (res != 0) {
+            return res;
+        }
         return this.stream.length();
     }
 
@@ -335,17 +357,30 @@ public class HierarhicalDatabase implements AutoCloseable {
     }
 
     public static void main(String[] args) {
+        new File("dbTest").delete();
         try (HierarhicalDatabase db = new HierarhicalDatabase(new File("dbTest"))) {
             HierarhicalDatabase strs = db.findChild("strings");
             if (strs == null) {
                 strs = db.addParent("strings");
             }
-            
+
             Random random = new Random();
             byte[] buff = new byte[64];
-            for (int i = 0; i < 10; i++) {
+            for (int i = 0; i < 5; i++) {
                 random.nextBytes(buff);
                 strs.addLeaf("string", Base64.getEncoder().encodeToString(buff));
+                System.out.println(db.map);
+            }
+
+            for (int i = 0; i < 3; i++) {
+                random.nextBytes(buff);
+                strs.deleteChild("string");
+                System.out.println(db.map);
+            }
+            for (int i = 0; i < 3; i++) {
+                random.nextBytes(buff);
+                strs.addLeaf("string", Base64.getEncoder().encodeToString(buff));
+                System.out.println(db.map);
             }
 
             DatabaseValue v = db.readValue();
@@ -369,5 +404,40 @@ public class HierarhicalDatabase implements AutoCloseable {
         v.getChildren().forEach(e -> {
             print(e.getKey(), e.getValue(), tabs + 1);
         });
+    }
+
+    private void removeFromMemory() throws IOException {
+        this.stream.seek(this.nodeAdress);
+        short nameSize = this.stream.readShort();
+        if (nameSize >= 0) {
+            this.stream.skipBytes(nameSize);
+            short valSize = this.stream.readShort();
+            this.map.remove(this.nodeAdress, this.nodeAdress + nameSize + valSize + Short.BYTES * 2);
+            return;
+        }
+        nameSize = (short) -nameSize;
+        this.stream.skipBytes(nameSize);
+        int listSize = 3;
+        this.map.add(this.nodeAdress, this.nodeAdress + nameSize + Short.BYTES + Long.BYTES * (listSize + 1));
+        while (true) {
+            for (int i = 0; i < listSize; i++) {
+                long adr = this.stream.readLong();
+                if (adr == 0) {
+                    continue;
+                }
+                long filePointer = this.stream.getFilePointer();
+                HierarhicalDatabase hd = new HierarhicalDatabase(this, adr);
+                hd.removeFromMemory();
+                this.stream.seek(filePointer);
+            }
+
+            long nextAdr = this.stream.readLong();
+            if (nextAdr == 0) {
+                break;
+            }
+            this.stream.seek(nextAdr);
+            listSize = 10;
+            this.map.remove(nextAdr, nextAdr + Long.BYTES * (listSize + 1));
+        }
     }
 }

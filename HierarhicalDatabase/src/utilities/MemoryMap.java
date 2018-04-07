@@ -13,7 +13,7 @@ public class MemoryMap {
             if (interval.end == begin) {
                 MemoryInterval res = new MemoryInterval(interval.begin, end);
                 this.intervals.remove(i);
-                this.intervals.add(res);
+                this.intervals.add(i, res);
                 ++i;
                 if (i == size) {
                     return;
@@ -51,7 +51,7 @@ public class MemoryMap {
                     this.intervals.add(new MemoryInterval(interval.begin, begin));
                 }
                 if (end != interval.end) {
-                    this.intervals.add(new MemoryInterval(interval.end, end));
+                    this.intervals.add(new MemoryInterval(end, interval.end));
                 }
                 return;
             }
