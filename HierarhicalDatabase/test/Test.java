@@ -1,16 +1,18 @@
 
-import java.io.File;
-import java.io.IOException;
-import utilities.HierarhicalDatabase;
+import utilities.MemoryMap;
 
 
 public class Test {
 
     public static void main(String[] args) {
-        try (HierarhicalDatabase db = new HierarhicalDatabase(new File("dbTest"))) {
-            
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
+        MemoryMap m = new MemoryMap();
+        
+        m.add(0, 10);
+        m.add(10, 20);
+        m.add(20, 30);
+        m.add(30, 40);
+        m.remove(20, 30);
+        
+        System.out.println(m.findFree(10));
     }
 }
